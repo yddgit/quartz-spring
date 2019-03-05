@@ -1,8 +1,7 @@
 package com.my.project.quartz.controller;
 
-import java.util.Set;
+import java.util.List;
 
-import org.quartz.JobKey;
 import org.quartz.SchedulerException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -11,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.my.project.quartz.job.JobStatus;
+import com.my.project.quartz.job.SchedulerStatus;
 import com.my.project.quartz.service.JobService;
 
 @RestController
@@ -20,13 +21,13 @@ public class JobAPI {
 	@Autowired
 	private JobService jobService;
 
-	@RequestMapping(value = "/info", method = RequestMethod.GET)
-	public String showInfo() {
-		return "This is a quartz scheduler sample project.";
+	@RequestMapping(value = "/info", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
+	public SchedulerStatus showInfo() throws SchedulerException {
+		return jobService.info();
 	}
 
 	@RequestMapping(value = "/list", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
-	public Set<JobKey> list() throws SchedulerException {
+	public List<JobStatus> list() throws SchedulerException {
 		return jobService.list();
 	}
 
