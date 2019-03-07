@@ -4,14 +4,19 @@ import org.quartz.Scheduler;
 import org.quartz.SchedulerException;
 import org.quartz.Trigger;
 import org.quartz.TriggerKey;
-import org.quartz.TriggerListener;
 import org.quartz.Trigger.TriggerState;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.my.project.quartz.job.JobStatus;
 import com.my.project.quartz.job.QuartzJob;
-import com.my.project.quartz.job.SchedulerStatus;
+import com.my.project.quartz.job.WorkFlowJob;
+import com.my.project.quartz.listener.TriggerMisfiredListener;
+import com.my.project.quartz.model.JobStatus;
+import com.my.project.quartz.model.SchedulerStatus;
+import com.my.project.quartz.model.workflow.FlowConfig;
+import com.my.project.quartz.model.workflow.FlowKey;
+import com.my.project.quartz.model.workflow.WorkFlow;
+import com.my.project.quartz.util.JsonUtils;
 
 import static org.quartz.JobBuilder.*;
 import static org.quartz.TriggerBuilder.*;
@@ -19,11 +24,12 @@ import static org.quartz.CronScheduleBuilder.*;
 import static org.quartz.JobKey.*;
 import static org.quartz.TriggerKey.*;
 import static org.quartz.impl.matchers.GroupMatcher.*;
-import static org.quartz.impl.matchers.EverythingMatcher.*;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -31,19 +37,32 @@ import javax.annotation.PreDestroy;
 import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobKey;
+import org.quartz.ListenerManager;
 
 @Service
 public class JobService {
 
-	private static final String GROUP_NAME = "testGroup";
+	private static final String GROUP_NAME = "myGroup";
+
 	@Autowired
 	private Scheduler scheduler;
 	@Autowired
-	private TriggerListener triggerListener;
+	private TriggerMisfiredListener triggerMisfiredListener;
+
+	private ListenerManager listenerManager;
+
+	public Scheduler getScheduler() {
+		return scheduler;
+	}
+
+	public ListenerManager getListenerManager() {
+		return listenerManager;
+	}
 
 	@PostConstruct
 	private void start() throws SchedulerException {
-		this.scheduler.getListenerManager().addTriggerListener(triggerListener, allTriggers());
+		listenerManager = this.scheduler.getListenerManager();
+		listenerManager.addTriggerListener(triggerMisfiredListener);
 	}
 
 	@PreDestroy
@@ -63,27 +82,36 @@ public class JobService {
 		status.setName(scheduler.getSchedulerName());
 		status.setRunningJobs(runningJobList);
 		status.setMetaData(scheduler.getMetaData());
+		status.setJobListeners(
+			listenerManager.getJobListeners().stream().map(j -> j.getName()).collect(Collectors.toList())
+		);
+		status.setJobListeners(
+			listenerManager.getTriggerListeners().stream().map(t -> t.getName()).collect(Collectors.toList())
+		);
 		return status;
 	}
 
 	public List<JobStatus> list() throws SchedulerException {
 		Set<JobKey> jobs =  scheduler.getJobKeys(jobGroupEquals(GROUP_NAME));
 		List<JobStatus> list = new ArrayList<JobStatus>();
-		JobStatus job = null;
+		JobStatus status = null;
 		TriggerKey triggerKey = null;
 		Trigger trigger = null;
-		for(JobKey j : jobs) {
-			job = new JobStatus();
-			job.setName(j.getName());
-			job.setGroup(j.getGroup());
+		for(JobKey job : jobs) {
+			List<? extends Trigger> triggers = scheduler.getTriggersOfJob(job);
+			if(triggers == null || triggers.size() == 0) { continue; }
+			status = new JobStatus();
+			status.setId(job.getName());
+			status.setName(scheduler.getJobDetail(job).getJobDataMap().getString(WorkFlowJob.FLOW_NAME));
+			status.setGroup(job.getGroup());
 			triggerKey = triggerKey(job.getName(), GROUP_NAME);
 			trigger = scheduler.getTrigger(triggerKey);
-			job.setStartTime(trigger.getStartTime());
-			job.setNextFireTime(trigger.getNextFireTime());
-			job.setPreviousFireTime(trigger.getPreviousFireTime());
-			job.setPriority(trigger.getPriority());
-			job.setState(scheduler.getTriggerState(triggerKey));
-			list.add(job);
+			status.setStartTime(trigger.getStartTime());
+			status.setNextFireTime(trigger.getNextFireTime());
+			status.setPreviousFireTime(trigger.getPreviousFireTime());
+			status.setPriority(trigger.getPriority());
+			status.setState(scheduler.getTriggerState(triggerKey));
+			list.add(status);
 		}
 		return list;
 	}
@@ -100,8 +128,7 @@ public class JobService {
 			.withSchedule(cronSchedule("*/5 * * * * ?")
 				// If the Trigger misfires, the CronTrigger wants to have it's next-fire-time
 				// updated to the next time in the schedule after the current time 
-				.withMisfireHandlingInstructionDoNothing()
-			)
+				.withMisfireHandlingInstructionDoNothing())
 			//.withSchedule(dailyAtHourAndMinute(10, 42)
 			//	.inTimeZone(TimeZone.getTimeZone("America/Los_Angeles")))
 			//.withSchedule(weeklyOnDayAndHourAndMinute(WEDNESDAY, 10, 42)
@@ -117,6 +144,16 @@ public class JobService {
 			scheduler.deleteJob(jobKey);
 		}
 		TriggerKey triggerKey = triggerKey(id, GROUP_NAME);
+		if(scheduler.checkExists(triggerKey)) {
+			scheduler.unscheduleJob(triggerKey);
+		}
+	}
+
+	public void delete(JobKey jobKey) throws SchedulerException {
+		if(scheduler.checkExists(jobKey)) {
+			scheduler.deleteJob(jobKey);
+		}
+		TriggerKey triggerKey = triggerKey(jobKey.getName(), jobKey.getGroup());
 		if(scheduler.checkExists(triggerKey)) {
 			scheduler.unscheduleJob(triggerKey);
 		}
@@ -149,6 +186,46 @@ public class JobService {
 		if(scheduler.checkExists(jobKey)) {
 			scheduler.triggerJob(jobKey);
 		}
+	}
+
+	public void add(FlowConfig flowConfig) throws SchedulerException {
+		String id = flowConfig.getName();//UUID.randomUUID().toString();
+		JobDetail job = newJob(WorkFlowJob.class)
+			.withIdentity(id, GROUP_NAME)
+			.usingJobData(WorkFlowJob.ROOT_FLOW_ID, id)
+			.usingJobData(WorkFlowJob.ROOT_FLOW_NAME, flowConfig.getName())
+			.usingJobData(WorkFlowJob.ROOT_FLOW_GROUP, GROUP_NAME)
+			.usingJobData(WorkFlowJob.FLOW_ID, id)
+			.usingJobData(WorkFlowJob.FLOW_NAME, flowConfig.getName())
+			.usingJobData(WorkFlowJob.FLOW_GROUP, GROUP_NAME)
+			.usingJobData(WorkFlowJob.FLOW_DEFINITION, JsonUtils.toJsonString(flowConfig.getWorkflow()))
+			.build();
+		Trigger trigger = newTrigger()
+			.withIdentity(id, GROUP_NAME)
+			.startNow()
+			.withSchedule(cronSchedule(flowConfig.getCronExpression())
+				.withMisfireHandlingInstructionDoNothing())
+			.forJob(job)
+			.build();
+		scheduler.scheduleJob(job, trigger);
+	}
+
+	public JobKey add(String flowName, WorkFlow workflow, FlowKey root, String listenerName) throws SchedulerException {
+		String id = UUID.randomUUID().toString();
+		JobDetail job = newJob(WorkFlowJob.class)
+			.withIdentity(id, GROUP_NAME)
+			.usingJobData(WorkFlowJob.FLOW_DEFINITION, JsonUtils.toJsonString(workflow))
+			.usingJobData(WorkFlowJob.ROOT_FLOW_ID, root.getId())
+			.usingJobData(WorkFlowJob.ROOT_FLOW_NAME, root.getName())
+			.usingJobData(WorkFlowJob.ROOT_FLOW_GROUP, root.getGroup())
+			.usingJobData(WorkFlowJob.FLOW_ID, id)
+			.usingJobData(WorkFlowJob.FLOW_NAME, flowName)
+			.usingJobData(WorkFlowJob.FLOW_GROUP, GROUP_NAME)
+			.usingJobData(WorkFlowJob.LISTENER_NAME, listenerName)
+			.storeDurably(true)
+			.build();
+		scheduler.addJob(job, true);
+		return job.getKey();
 	}
 
 }

@@ -1,4 +1,4 @@
-package com.my.project.quartz.job;
+package com.my.project.quartz.model;
 
 import java.util.Date;
 
@@ -6,6 +6,7 @@ import org.quartz.Trigger.TriggerState;
 
 public class JobStatus {
 
+	private String id;
 	private String name;
 	private String group;
 	private Date startTime;
@@ -14,6 +15,12 @@ public class JobStatus {
 	private int priority;
 	private TriggerState state;
 
+	public String getId() {
+		return id;
+	}
+	public void setId(String id) {
+		this.id = id;
+	}
 	public String getName() {
 		return name;
 	}

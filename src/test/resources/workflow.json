@@ -1,0 +1,17 @@
+{
+	"name": "workflow",
+	"cronExpression": "*/5 * * * * ?",
+	"workflow": {
+		"type": "SEQ",
+		"name": "test-single",
+		"jobs": [
+			{
+				"type": "SINGLE",
+				"name": "single1"
+			},{
+				"type": "SINGLE",
+				"name": "single2"
+			}
+		]
+	}
+}
