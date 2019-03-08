@@ -10,11 +10,12 @@ import org.springframework.stereotype.Service;
 
 import com.my.project.quartz.job.QuartzJob;
 import com.my.project.quartz.job.WorkFlowJob;
+import com.my.project.quartz.listener.FlowJobListener;
+import com.my.project.quartz.listener.FlowTriggerListener;
 import com.my.project.quartz.listener.TriggerMisfiredListener;
 import com.my.project.quartz.model.JobStatus;
 import com.my.project.quartz.model.SchedulerStatus;
 import com.my.project.quartz.model.workflow.FlowConfig;
-import com.my.project.quartz.model.workflow.FlowKey;
 import com.my.project.quartz.model.workflow.WorkFlow;
 import com.my.project.quartz.util.JsonUtils;
 
@@ -28,7 +29,6 @@ import static org.quartz.impl.matchers.GroupMatcher.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
@@ -48,6 +48,10 @@ public class JobService {
 	private Scheduler scheduler;
 	@Autowired
 	private TriggerMisfiredListener triggerMisfiredListener;
+	@Autowired
+	private FlowTriggerListener flowTriggerListener;
+	@Autowired
+	private FlowJobListener flowJobListener;
 
 	private ListenerManager listenerManager;
 
@@ -63,6 +67,8 @@ public class JobService {
 	private void start() throws SchedulerException {
 		listenerManager = this.scheduler.getListenerManager();
 		listenerManager.addTriggerListener(triggerMisfiredListener);
+		listenerManager.addTriggerListener(flowTriggerListener);
+		listenerManager.addJobListener(flowJobListener);
 	}
 
 	@PreDestroy
@@ -85,7 +91,7 @@ public class JobService {
 		status.setJobListeners(
 			listenerManager.getJobListeners().stream().map(j -> j.getName()).collect(Collectors.toList())
 		);
-		status.setJobListeners(
+		status.setTriggerListeners(
 			listenerManager.getTriggerListeners().stream().map(t -> t.getName()).collect(Collectors.toList())
 		);
 		return status;
@@ -101,8 +107,7 @@ public class JobService {
 			List<? extends Trigger> triggers = scheduler.getTriggersOfJob(job);
 			if(triggers == null || triggers.size() == 0) { continue; }
 			status = new JobStatus();
-			status.setId(job.getName());
-			status.setName(scheduler.getJobDetail(job).getJobDataMap().getString(WorkFlowJob.FLOW_NAME));
+			status.setName(job.getName());
 			status.setGroup(job.getGroup());
 			triggerKey = triggerKey(job.getName(), GROUP_NAME);
 			trigger = scheduler.getTrigger(triggerKey);
@@ -189,19 +194,15 @@ public class JobService {
 	}
 
 	public void add(FlowConfig flowConfig) throws SchedulerException {
-		String id = flowConfig.getName();//UUID.randomUUID().toString();
+		JobKey jobKey = jobKey(flowConfig.getName(), GROUP_NAME);
 		JobDetail job = newJob(WorkFlowJob.class)
-			.withIdentity(id, GROUP_NAME)
-			.usingJobData(WorkFlowJob.ROOT_FLOW_ID, id)
-			.usingJobData(WorkFlowJob.ROOT_FLOW_NAME, flowConfig.getName())
-			.usingJobData(WorkFlowJob.ROOT_FLOW_GROUP, GROUP_NAME)
-			.usingJobData(WorkFlowJob.FLOW_ID, id)
-			.usingJobData(WorkFlowJob.FLOW_NAME, flowConfig.getName())
-			.usingJobData(WorkFlowJob.FLOW_GROUP, GROUP_NAME)
+			.withIdentity(jobKey)
+			.usingJobData(WorkFlowJob.ROOT_FLOW, jobKey.toString())
 			.usingJobData(WorkFlowJob.FLOW_DEFINITION, JsonUtils.toJsonString(flowConfig.getWorkflow()))
 			.build();
 		Trigger trigger = newTrigger()
-			.withIdentity(id, GROUP_NAME)
+			.withIdentity(flowConfig.getName(), GROUP_NAME)
+			.usingJobData(WorkFlowJob.IS_FLOW, Boolean.toString(true))
 			.startNow()
 			.withSchedule(cronSchedule(flowConfig.getCronExpression())
 				.withMisfireHandlingInstructionDoNothing())
@@ -210,17 +211,11 @@ public class JobService {
 		scheduler.scheduleJob(job, trigger);
 	}
 
-	public JobKey add(String flowName, WorkFlow workflow, FlowKey root, String listenerName) throws SchedulerException {
-		String id = UUID.randomUUID().toString();
+	public JobKey add(String root, String jobName, WorkFlow workflow, String listenerName) throws SchedulerException {
 		JobDetail job = newJob(WorkFlowJob.class)
-			.withIdentity(id, GROUP_NAME)
+			.withIdentity(jobName, GROUP_NAME)
 			.usingJobData(WorkFlowJob.FLOW_DEFINITION, JsonUtils.toJsonString(workflow))
-			.usingJobData(WorkFlowJob.ROOT_FLOW_ID, root.getId())
-			.usingJobData(WorkFlowJob.ROOT_FLOW_NAME, root.getName())
-			.usingJobData(WorkFlowJob.ROOT_FLOW_GROUP, root.getGroup())
-			.usingJobData(WorkFlowJob.FLOW_ID, id)
-			.usingJobData(WorkFlowJob.FLOW_NAME, flowName)
-			.usingJobData(WorkFlowJob.FLOW_GROUP, GROUP_NAME)
+			.usingJobData(WorkFlowJob.ROOT_FLOW, root)
 			.usingJobData(WorkFlowJob.LISTENER_NAME, listenerName)
 			.storeDurably(true)
 			.build();

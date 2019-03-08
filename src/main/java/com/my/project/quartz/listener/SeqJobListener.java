@@ -29,7 +29,7 @@ public class SeqJobListener extends JobListenerSupport {
         this.name = name;
         this.jobKeys = jobKeys;
         chainLinks = new HashMap<JobKey, JobKey>();
-		for(int i=0; i<jobKeys.size()-1; i++) {
+		for(int i = 0; i < jobKeys.size()-1; i++) {
 			JobKey firstJob = jobKeys.get(i);
 			JobKey secondJob = jobKeys.get(i+1);
 			if(firstJob == null || secondJob == null) {

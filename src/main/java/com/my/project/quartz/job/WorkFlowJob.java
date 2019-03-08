@@ -3,6 +3,7 @@ package com.my.project.quartz.job;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import org.quartz.DisallowConcurrentExecution;
 import org.quartz.JobDataMap;
@@ -20,14 +21,12 @@ import org.springframework.stereotype.Component;
 
 import com.my.project.quartz.exception.WorkFlowException;
 import com.my.project.quartz.listener.SeqJobListener;
-import com.my.project.quartz.model.workflow.FlowKey;
 import com.my.project.quartz.model.workflow.FlowType;
 import com.my.project.quartz.model.workflow.WorkFlow;
 import com.my.project.quartz.service.JobService;
 import com.my.project.quartz.util.JsonUtils;
 
 import static org.quartz.impl.matchers.KeyMatcher.*;
-import static org.quartz.JobKey.*;
 import static com.my.project.quartz.model.workflow.FlowType.*;
 
 @Component
@@ -35,13 +34,9 @@ import static com.my.project.quartz.model.workflow.FlowType.*;
 @DisallowConcurrentExecution
 public class WorkFlowJob extends QuartzJobBean {
 
+	public static final String IS_FLOW = "_isFlow";
 	public static final String FLOW_DEFINITION = "_flowDefinition";
-	public static final String ROOT_FLOW_ID = "_rootFlowId";
-	public static final String ROOT_FLOW_NAME = "_rootFlowName";
-	public static final String ROOT_FLOW_GROUP = "_rootFlowGroup";
-	public static final String FLOW_ID = "_flowId";
-	public static final String FLOW_NAME = "_flowName";
-	public static final String FLOW_GROUP = "_flowGroup";
+	public static final String ROOT_FLOW = "_rootFlow";
 	public static final String LISTENER_NAME = "_listenerName";
 
 	private static final Logger logger = LoggerFactory.getLogger(QuartzJob.class);
@@ -53,65 +48,73 @@ public class WorkFlowJob extends QuartzJobBean {
 	protected void executeInternal(JobExecutionContext context) throws JobExecutionException {
 		try {
 			JobDataMap data = context.getJobDetail().getJobDataMap();
-			String rootId = data.getString(ROOT_FLOW_ID);
-			String rootName = data.getString(ROOT_FLOW_NAME);
-			String rootGroup = data.getString(ROOT_FLOW_GROUP);
-			FlowKey root = new FlowKey(rootId, rootName, rootGroup);
-			String config = context.getJobDetail().getJobDataMap().getString(FLOW_DEFINITION);
-			WorkFlow workflow = JsonUtils.jsonToObject(config, WorkFlow.class);
-			String flowName = data.getString(FLOW_NAME);
-			if(SINGLE.equals(workflow.getType())) {
-				flowName = flowName.substring(0, flowName.lastIndexOf("." + workflow.getName()));
+			String root = data.getString(ROOT_FLOW);
+			WorkFlow workflow = JsonUtils.jsonToObject(data.getString(FLOW_DEFINITION), WorkFlow.class);
+
+			String jobName = context.getJobDetail().getKey().getName();
+			String name = workflow.getName();
+			if(SINGLE.equals(workflow.getType()) && jobName.endsWith("." + name)) {
+				jobName = jobName.substring(0, jobName.lastIndexOf("." + name));
 			}
-			executeWorkFlow(root, workflow, flowName);
+			executeWorkFlow(root, jobName, workflow);
 		} catch (Exception e) {
 			throw new JobExecutionException(e);
 		}
 	}
 
-	private void executeWorkFlow(FlowKey root, WorkFlow workflow, String parentFlowName) throws SchedulerException, WorkFlowException {
+	private void executeWorkFlow(String root, String parentJobName, WorkFlow workflow) throws SchedulerException, WorkFlowException {
 		FlowType type = workflow.getType();
 		if(type == null) {
 			throw new WorkFlowException("workflow type can not be null", workflow);
 		}
 		switch(type) {
 			case SINGLE:
-				executeSingleJob(root, workflow, parentFlowName);
+				executeSingleJob(root, parentJobName, workflow);
 				break;
 			case SEQ:
-				executeSeqJob(root, workflow, parentFlowName);
+				executeSeqJob(root, parentJobName, workflow);
 				break;
 			case ALL:
-				executeAllJob(root, workflow, parentFlowName);
+				executeAllJob(root, parentJobName, workflow);
 				break;
 			case ANY:
-				executeAnyJob(root, workflow, parentFlowName);
+				executeAnyJob(root, parentJobName, workflow);
 				break;
 			default:
 				throw new WorkFlowException("unknown workflow type [" + type + "]", workflow);
 		}
 	}
 
-	private void executeSingleJob(FlowKey root, WorkFlow workflow, String parentFlowName) throws SchedulerException {
-		logger.info("[" + SINGLE.name() + "]execute: " + generateFlowName(workflow, parentFlowName));
+	private void executeSingleJob(String root, String parentJobName, WorkFlow workflow) throws SchedulerException {
+		logger.info("[" + SINGLE.name() + "]execute: " + generateJobName(workflow, parentJobName));
+		try {
+			logger.info("sleep...60s");
+			TimeUnit.SECONDS.sleep(60);
+			logger.info("sleep...end");
+		} catch (InterruptedException e) {
+			logger.error("sleep error", e);
+		}
 	}
 
-	private void executeSeqJob(FlowKey root, WorkFlow workflow, String parentFlowName) throws SchedulerException, WorkFlowException {
-		String flowName = generateFlowName(workflow, parentFlowName);
-		logger.info("[" + SEQ.name() + "   ]execute: " + flowName);
+	private void executeSeqJob(String root, String parentJobName, WorkFlow workflow) throws SchedulerException, WorkFlowException {
+
+		String jobName = generateJobName(workflow, parentJobName);
+		logger.info("[" + SEQ.name() + "   ]execute: " + jobName);
+
 		List<WorkFlow> jobs = workflow.getJobs();
 		if(jobs == null || jobs.size() == 0) {
-			jobService.delete(jobKey(root.getId(), root.getGroup()));
-			throw new WorkFlowException("SEQ workflow must have at least one child job", workflow);
+			jobService.delete(root);
+			throw new WorkFlowException(SEQ.name() + " workflow must have at least one child job", workflow);
 		}
+
 		if(jobs.size() == 1) {
-			executeWorkFlow(root, jobs.get(0), flowName);
+			executeWorkFlow(root, jobName, jobs.get(0));
 		} else {
-			String listenerName = FlowType.SEQ.name() + "-" + UUID.randomUUID().toString();
+			String listenerName = SEQ.name() + "-" + UUID.randomUUID().toString();
 			List<JobKey> jobKeys = new ArrayList<JobKey>();
 			List<Matcher<JobKey>> matchers = new ArrayList<Matcher<JobKey>>();
 			for(WorkFlow job : jobs) {
-				JobKey jobKey = jobService.add(generateFlowName(job, flowName), job, root, listenerName);
+				JobKey jobKey = jobService.add(root, generateJobName(job, jobName), job, listenerName);
 				jobKeys.add(jobKey);
 				matchers.add(keyEquals(jobKey));
 			}
@@ -121,16 +124,16 @@ public class WorkFlowJob extends QuartzJobBean {
 		}
 	}
 
-	private void executeAllJob(FlowKey root, WorkFlow workflow, String parentFlowName) throws SchedulerException {
-		logger.info("[" + SINGLE.name() + "   ]execute: " + generateFlowName(workflow, parentFlowName));
+	private void executeAllJob(String root, String parentJobName, WorkFlow workflow) throws SchedulerException {
+		logger.info("[" + SINGLE.name() + "   ]execute: " + generateJobName(workflow, parentJobName));
 	}
 
-	private void executeAnyJob(FlowKey root, WorkFlow workflow, String parentFlowName) throws SchedulerException {
-		logger.info("[" + SINGLE.name() + "   ]execute: " + generateFlowName(workflow, parentFlowName));
+	private void executeAnyJob(String root, String parentJobName, WorkFlow workflow) throws SchedulerException {
+		logger.info("[" + SINGLE.name() + "   ]execute: " + generateJobName(workflow, parentJobName));
 	}
 
-	private String generateFlowName(WorkFlow workflow, String parentFlowName) {
-		return (parentFlowName == null ? "" : parentFlowName + ".") + workflow.getName();
+	private String generateJobName(WorkFlow workflow, String parentJobName) {
+		return (parentJobName == null ? "" : parentJobName + ".") + workflow.getName();
 	}
 
 }
