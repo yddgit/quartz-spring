@@ -12,6 +12,7 @@ public class JobStatus {
 	private Date previousFireTime;
 	private Date nextFireTime;
 	private int priority;
+	private boolean running;
 	private TriggerState state;
 
 	public String getName() {
@@ -49,6 +50,12 @@ public class JobStatus {
 	}
 	public void setPriority(int priority) {
 		this.priority = priority;
+	}
+	public boolean isRunning() {
+		return running;
+	}
+	public void setRunning(boolean running) {
+		this.running = running;
 	}
 	public TriggerState getState() {
 		return state;

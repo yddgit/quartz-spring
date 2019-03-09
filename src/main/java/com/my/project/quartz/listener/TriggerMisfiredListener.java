@@ -8,9 +8,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class TriggerMisfiredListener extends TriggerListenerSupport {
 
+	public static final String NAME = "_TriggerMisfiredListener";
+
 	@Override
 	public String getName() {
-		return "TriggerMisfiredListener";
+		return NAME;
 	}
 
 	@Override

@@ -4,7 +4,7 @@ public class FlowConfig {
 
 	private String name;
 	private String cronExpression;
-	private WorkFlow workflow;
+	private Workflow workflow;
 
 	public String getName() {
 		return name;
@@ -18,10 +18,10 @@ public class FlowConfig {
 	public void setCronExpression(String cronExpression) {
 		this.cronExpression = cronExpression;
 	}
-	public WorkFlow getWorkflow() {
+	public Workflow getWorkflow() {
 		return workflow;
 	}
-	public void setWorkflow(WorkFlow workflow) {
+	public void setWorkflow(Workflow workflow) {
 		this.workflow = workflow;
 	}
 

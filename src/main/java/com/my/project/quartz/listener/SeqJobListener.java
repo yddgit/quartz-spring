@@ -14,9 +14,11 @@ import org.quartz.SchedulerException;
 import org.quartz.TriggerKey;
 import org.quartz.listeners.JobListenerSupport;
 
-import com.my.project.quartz.job.WorkFlowJob;
+import com.my.project.quartz.job.WorkflowJob;
 
 public class SeqJobListener extends JobListenerSupport {
+
+	public static final String NAME = "_SeqJobListener";
 
 	private String name;
 	private List<JobKey> jobKeys;
@@ -66,7 +68,7 @@ public class SeqJobListener extends JobListenerSupport {
 	}
 
 	private void removeListener(JobExecutionContext context) {
-    	String listenerName = context.getJobDetail().getJobDataMap().getString(WorkFlowJob.LISTENER_NAME);
+    	String listenerName = context.getJobDetail().getJobDataMap().getString(WorkflowJob.LISTENER_NAME);
     	try {
 			context.getScheduler().getListenerManager().removeJobListener(listenerName);
 		} catch (SchedulerException e) {

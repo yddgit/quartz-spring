@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.my.project.quartz.exception.WorkflowException;
 import com.my.project.quartz.model.JobStatus;
 import com.my.project.quartz.model.SchedulerStatus;
 import com.my.project.quartz.model.workflow.FlowConfig;
@@ -39,7 +40,7 @@ public class JobAPI {
 	}
 
 	@RequestMapping(value = "/add", method = RequestMethod.POST, consumes = MediaType.APPLICATION_JSON_UTF8_VALUE)
-	public void add(@RequestBody FlowConfig flowConfig) throws SchedulerException {
+	public void add(@RequestBody FlowConfig flowConfig) throws SchedulerException, WorkflowException {
 		jobService.add(flowConfig);
 	}
 

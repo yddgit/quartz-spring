@@ -15,20 +15,22 @@ import org.springframework.stereotype.Component;
 @Component
 public class FlowTriggerListener extends TriggerListenerSupport {
 
-	private List<JobKey> runningWorkFlow;
+	public static final String NAME = "_FlowTriggerListener";
+
+	private List<JobKey> runningWorkflow;
 	private Map<JobKey, JobKey> mutexJobs;
 
     public FlowTriggerListener() {
-        this.runningWorkFlow = new CopyOnWriteArrayList<JobKey>();
+        this.runningWorkflow = new CopyOnWriteArrayList<JobKey>();
         this.mutexJobs = new ConcurrentHashMap<JobKey, JobKey>();
     }
 
-    public void addRunningWorkFlow(JobKey jobKey) {
-    	this.runningWorkFlow.add(jobKey);
+    public void addRunningWorkflow(JobKey jobKey) {
+    	this.runningWorkflow.add(jobKey);
     }
 
-    public void removeRunningWorkFlow(JobKey jobKey) {
-    	this.runningWorkFlow.remove(jobKey);
+    public void removeRunningWorkflow(JobKey jobKey) {
+    	this.runningWorkflow.remove(jobKey);
     }
 
     public void addMutexJob(JobKey job1, JobKey job2) {
@@ -41,35 +43,36 @@ public class FlowTriggerListener extends TriggerListenerSupport {
     	this.mutexJobs.remove(job2, job1);
     }
 
+    public boolean isRunning(JobKey jobKey) {
+    	return runningWorkflow.contains(jobKey);
+    }
+
     @Override
 	public String getName() {
-		return "FlowTriggerListener";
+		return NAME;
 	}
 
 	@Override
 	public boolean vetoJobExecution(Trigger trigger, JobExecutionContext context) {
-		boolean isBlocked = isBlocked(trigger, context);
-		if(isBlocked) {
-			getLog().info(trigger.getJobKey() + " is running now, it will not run until the last finished.");
-			return true;
-		}
-		return false;
+		return isBlocked(trigger, context);
 	}
 
 	private synchronized boolean isBlocked(Trigger trigger, JobExecutionContext context) {
 		JobKey jobKey = trigger.getJobKey();
-		if(runningWorkFlow.contains(jobKey)) {
+		if(runningWorkflow.contains(jobKey)) {
+			getLog().info(jobKey + " is running now, will not run it until the last finished.");
 			return true;
 		}
 		JobKey mutexJob = mutexJobs.get(jobKey);
 		try {
 			for(JobExecutionContext c : context.getScheduler().getCurrentlyExecutingJobs()) {
 				if(c.getJobDetail().getKey().equals(mutexJob)) {
+					getLog().info("mutex job " + mutexJob + " is running now, will not run it until the mutex job finished.");
 					return true;
 				}
 			}
 		} catch (SchedulerException e) {
-			getLog().error(e.getMessage(), e);
+			getLog().error("check mutex job for job " + jobKey + " error, will not run it", e);
 			return true;
 		}
 		return false;
