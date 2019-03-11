@@ -51,45 +51,41 @@ public class WorkflowJob extends QuartzJobBean {
 			JobDataMap data = context.getJobDetail().getJobDataMap();
 			String root = data.getString(ROOT_FLOW);
 			String end = data.getString(END_FLOW);
+			Boolean isFlow = data.getBooleanValueFromString(IS_FLOW);
 			Workflow workflow = JsonUtils.jsonToObject(data.getString(FLOW_DEFINITION), Workflow.class);
 
 			String jobName = context.getJobDetail().getKey().getName();
-			String name = workflow.getName();
-			if(SINGLE.equals(workflow.getType()) && jobName.endsWith("." + name)) {
-				jobName = jobName.substring(0, jobName.lastIndexOf("." + name));
-			}
-
+			if(isFlow) { jobName = jobName + "." + workflow.getName(); }
 			executeWorkflow(root, end, jobName, workflow);
 		} catch (Exception e) {
 			throw new JobExecutionException(e);
 		}
 	}
 
-	private void executeWorkflow(String root, String end, String parentJobName, Workflow workflow) throws SchedulerException, WorkflowException {
+	private void executeWorkflow(String root, String end, String jobName, Workflow workflow) throws SchedulerException, WorkflowException {
 		FlowType type = workflow.getType();
 		if(type == null) {
 			throw new WorkflowException("workflow type can not be null", workflow);
 		}
 		switch(type) {
 			case SINGLE:
-				executeSingleJob(root, end, parentJobName, workflow);
+				executeSingleJob(root, end, jobName, workflow);
 				break;
 			case SEQ:
-				executeSeqJob(root, end, parentJobName, workflow);
+				executeSeqJob(root, end, jobName, workflow);
 				break;
 			case ALL:
-				executeAllJob(root, end, parentJobName, workflow);
+				executeAllJob(root, end, jobName, workflow);
 				break;
 			case ANY:
-				executeAnyJob(root, end, parentJobName, workflow);
+				executeAnyJob(root, end, jobName, workflow);
 				break;
 			default:
 				throw new WorkflowException("unknown workflow type [" + type + "]", workflow);
 		}
 	}
 
-	private void executeSingleJob(String root, String end, String parentJobName, Workflow workflow) throws SchedulerException {
-		String jobName = generateJobName(workflow, parentJobName);
+	private void executeSingleJob(String root, String end, String jobName, Workflow workflow) throws SchedulerException {
 		if(end.equals(jobName)) { return; }
 
 		logger.info("[" + SINGLE.name() + "]execute: " + jobName);
@@ -100,9 +96,8 @@ public class WorkflowJob extends QuartzJobBean {
 		}
 	}
 
-	private void executeSeqJob(String root, String end, String parentJobName, Workflow workflow) throws SchedulerException, WorkflowException {
+	private void executeSeqJob(String root, String end, String jobName, Workflow workflow) throws SchedulerException, WorkflowException {
 
-		String jobName = generateJobName(workflow, parentJobName);
 		logger.info("[" + SEQ.name() + "   ]execute: " + jobName);
 
 		List<Workflow> jobs = workflow.getJobs();
@@ -111,29 +106,26 @@ public class WorkflowJob extends QuartzJobBean {
 			throw new WorkflowException(SEQ.name() + " workflow must have at least one child job", workflow);
 		}
 
-		if(jobs.size() == 1) {
-			executeWorkflow(root, end, jobName, jobs.get(0));
-		} else {
-			String listenerName = SeqJobListener.NAME + "." + jobName + "." + UUID.randomUUID().toString();
-			List<JobKey> jobKeys = new ArrayList<JobKey>();
-			List<Matcher<JobKey>> matchers = new ArrayList<Matcher<JobKey>>();
-			for(Workflow job : jobs) {
-				JobKey jobKey = jobService.add(root, end, generateJobName(job, jobName), job, listenerName);
-				jobKeys.add(jobKey);
-				matchers.add(keyEquals(jobKey));
-			}
-			SeqJobListener seqJobListener = new SeqJobListener(listenerName, jobKeys);
-			jobService.getListenerManager().addJobListener(seqJobListener, matchers);
-			jobService.getScheduler().triggerJob(jobKeys.get(0));
+		String listenerName = SeqJobListener.NAME + "." + jobName + "." + UUID.randomUUID().toString();
+		List<JobKey> jobKeys = new ArrayList<JobKey>();
+		List<Matcher<JobKey>> matchers = new ArrayList<Matcher<JobKey>>();
+		for(Workflow job : jobs) {
+			JobKey jobKey = jobService.add(root, end, generateJobName(job, jobName), job, listenerName);
+			jobKeys.add(jobKey);
+			matchers.add(keyEquals(jobKey));
 		}
+		SeqJobListener seqJobListener = new SeqJobListener(listenerName, jobKeys);
+		jobService.getListenerManager().addJobListener(seqJobListener, matchers);
+		jobService.getScheduler().triggerJob(jobKeys.get(0));
+
 	}
 
 	private void executeAllJob(String root, String end, String parentJobName, Workflow workflow) throws SchedulerException {
-		logger.info("[" + SINGLE.name() + "   ]execute: " + generateJobName(workflow, parentJobName));
+		logger.info("[" + ALL.name() + "   ]execute: " + generateJobName(workflow, parentJobName));
 	}
 
 	private void executeAnyJob(String root, String end, String parentJobName, Workflow workflow) throws SchedulerException {
-		logger.info("[" + SINGLE.name() + "   ]execute: " + generateJobName(workflow, parentJobName));
+		logger.info("[" + ANY.name() + "   ]execute: " + generateJobName(workflow, parentJobName));
 	}
 
 	private String generateJobName(Workflow workflow, String parentJobName) {

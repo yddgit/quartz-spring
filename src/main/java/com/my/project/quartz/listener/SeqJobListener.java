@@ -42,6 +42,7 @@ public class SeqJobListener extends JobListenerSupport {
 			}
 			chainLinks.put(firstJob, secondJob);
 		}
+		chainLinks.put(jobKeys.get(jobKeys.size()-1), null);
     }
 
 	@Override
