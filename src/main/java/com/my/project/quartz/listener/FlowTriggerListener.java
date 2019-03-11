@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class FlowTriggerListener extends TriggerListenerSupport {
 
-	public static final String NAME = "_FlowTriggerListener";
+	public static final String NAME = "_flowTriggerListener";
 
 	private List<JobKey> runningWorkflow;
 	private Map<JobKey, JobKey> mutexJobs;
@@ -60,19 +60,19 @@ public class FlowTriggerListener extends TriggerListenerSupport {
 	private synchronized boolean isBlocked(Trigger trigger, JobExecutionContext context) {
 		JobKey jobKey = trigger.getJobKey();
 		if(runningWorkflow.contains(jobKey)) {
-			getLog().info(jobKey + " is running now, will not run it until the last finished.");
+			getLog().debug("job '" + jobKey + "' is running now, will not run it until the last finished.");
 			return true;
 		}
 		JobKey mutexJob = mutexJobs.get(jobKey);
 		try {
 			for(JobExecutionContext c : context.getScheduler().getCurrentlyExecutingJobs()) {
 				if(c.getJobDetail().getKey().equals(mutexJob)) {
-					getLog().info("mutex job " + mutexJob + " is running now, will not run it until the mutex job finished.");
+					getLog().info("mutex job '" + mutexJob + "' is running now, will not run it until the mutex job finished.");
 					return true;
 				}
 			}
 		} catch (SchedulerException e) {
-			getLog().error("check mutex job for job " + jobKey + " error, will not run it", e);
+			getLog().error("check mutex job for job '" + jobKey + "' error, will not run it", e);
 			return true;
 		}
 		return false;

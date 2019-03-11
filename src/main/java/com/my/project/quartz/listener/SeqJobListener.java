@@ -18,7 +18,7 @@ import com.my.project.quartz.job.WorkflowJob;
 
 public class SeqJobListener extends JobListenerSupport {
 
-	public static final String NAME = "_SeqJobListener";
+	public static final String NAME = "_seqJobListener";
 
 	private String name;
 	private List<JobKey> jobKeys;
@@ -72,7 +72,7 @@ public class SeqJobListener extends JobListenerSupport {
     	try {
 			context.getScheduler().getListenerManager().removeJobListener(listenerName);
 		} catch (SchedulerException e) {
-			getLog().error("Error encountered during remove job listener [" + listenerName + "]", e);
+			getLog().error("Error encountered during remove job listener '" + listenerName + "'", e);
 		}
     }
 
@@ -88,7 +88,7 @@ public class SeqJobListener extends JobListenerSupport {
 					scheduler.unscheduleJob(triggerKey);
 				}
 			} catch (SchedulerException e) {
-				getLog().error("Error encountered during remove job [" + jobKey + "]", e);
+				getLog().error("Error encountered during remove job '" + jobKey + "'", e);
 			}
 		}
 	}

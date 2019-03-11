@@ -5,6 +5,8 @@ import org.quartz.SchedulerException;
 import org.quartz.Trigger;
 import org.quartz.TriggerKey;
 import org.quartz.Trigger.TriggerState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
@@ -46,6 +48,8 @@ import org.quartz.ListenerManager;
 
 @Service
 public class JobService {
+
+	private static final Logger logger = LoggerFactory.getLogger(JobService.class);
 
 	private static final String GROUP_NAME = "myGroup";
 
@@ -272,6 +276,7 @@ public class JobService {
 		// check for duplicate names
 		List<String> jobNames = new ArrayList<String>();
 		getJobName(flowConfig.getName(), workflow, jobNames);
+		logger.info("workflow job list: " + JsonUtils.toJsonString(jobNames.subList(0, jobNames.size()-1), true));
 		Set<String> duplicateName = checkDuplicateName(jobNames);
 		if(duplicateName != null && duplicateName.size() > 0) {
 			throw new WorkflowException("workflow name duplicated: " + duplicateName);

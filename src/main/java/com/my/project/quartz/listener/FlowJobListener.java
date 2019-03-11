@@ -15,7 +15,7 @@ import com.my.project.quartz.job.WorkflowJob;
 @Component
 public class FlowJobListener extends JobListenerSupport {
 
-	public static final String NAME = "_FlowJobListener";
+	public static final String NAME = "_flowJobListener";
 
 	@Override
 	public String getName() {
@@ -28,11 +28,11 @@ public class FlowJobListener extends JobListenerSupport {
 		JobKey jobKey = context.getJobDetail().getKey();
 		if(isFlow) {
 			try {
-				getLog().info("add " + jobKey + " running workflow list");
+				getLog().info("add '" + jobKey + "' running workflow list");
 				FlowTriggerListener flowTriggerListener = (FlowTriggerListener)context.getScheduler().getListenerManager().getTriggerListener(FlowTriggerListener.NAME);
 				flowTriggerListener.addRunningWorkflow(context.getJobDetail().getKey());
 			} catch (SchedulerException e) {
-				getLog().error("add " + jobKey + " to running workflow list error", e);
+				getLog().error("add '" + jobKey + "' to running workflow list error", e);
 			}
 		}
 	}
@@ -45,11 +45,11 @@ public class FlowJobListener extends JobListenerSupport {
 		JobKey rootJobKey = jobKey(data.getString(WorkflowJob.ROOT_FLOW), jobKey.getGroup());
 		if(jobKey.getName().equals(data.getString(WorkflowJob.END_FLOW))) {
 			try {
-				getLog().info("remove " + rootJobKey + " from running workflow list");
+				getLog().info("remove '" + rootJobKey + "' from running workflow list");
 				FlowTriggerListener flowTriggerListener = (FlowTriggerListener)context.getScheduler().getListenerManager().getTriggerListener(FlowTriggerListener.NAME);
 				flowTriggerListener.removeRunningWorkflow(rootJobKey);
 			} catch (SchedulerException e) {
-				getLog().error("remove " + rootJobKey + " from running workflow list error", e);
+				getLog().error("remove '" + rootJobKey + "' from running workflow list error", e);
 			}
 		}
 	}

@@ -32,14 +32,22 @@ public class JsonUtils {
 	}
 
 	public static String toJsonString(Object o) {
+		return toJsonString(o, false);
+    }
+
+	public static String toJsonString(Object o, boolean pretty) {
 		try {
-			return mapper.writeValueAsString(o);
+			if(pretty) {
+				return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(o);
+			} else {
+				return mapper.writeValueAsString(o);
+			}
 		} catch (Exception e) {
 			throw new RuntimeException("object to json string error", e);
 		}
     }
 
-    public static <T> T jsonToObject(String json, Class<T> clazz) {
+	public static <T> T jsonToObject(String json, Class<T> clazz) {
 		try {
 			return mapper.readValue(json, clazz);
 		} catch (Exception e) {
