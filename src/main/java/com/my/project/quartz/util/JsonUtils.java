@@ -55,6 +55,15 @@ public class JsonUtils {
 		}
     }
 
+	@SuppressWarnings("rawtypes")
+	public static <T> T jsonToObject(String json, TypeReference valueTypeRef) {
+		try {
+			return mapper.readValue(json, valueTypeRef);
+		} catch (Exception e) {
+			throw new RuntimeException("json string to object error", e);
+		}
+    }
+
     public static <K, V> Map<K, V> jsonToMap(String json, Class<K> keyClazz, Class<V> valueClazz) {
     	try {
     		return mapper.readValue(json, new TypeReference<Map<K, V>>() {});

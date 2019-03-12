@@ -20,8 +20,7 @@ public class TriggerMisfiredListener extends TriggerListenerSupport {
 	@Override
 	public void triggerMisfired(Trigger trigger) {
 		JobKey job = trigger.getJobKey();
-		getLog().warn("Job '{}' in Group '{}' is misfired on {}", job.getName(), job.getGroup(),
-				new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(trigger.getNextFireTime()));
+		getLog().warn("job '{}' is misfired on {}", job, new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ").format(trigger.getNextFireTime()));
 	}
 
 }

@@ -1,11 +1,13 @@
 package com.my.project.quartz.listener;
 
 import static org.quartz.TriggerKey.triggerKey;
+import static org.quartz.JobKey.jobKey;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.quartz.JobDataMap;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobExecutionException;
 import org.quartz.JobKey;
@@ -14,19 +16,19 @@ import org.quartz.SchedulerException;
 import org.quartz.TriggerKey;
 import org.quartz.listeners.JobListenerSupport;
 
-import com.my.project.quartz.job.WorkflowJob;
+import com.my.project.quartz.job.ChainedJob;
 
-public class SeqJobListener extends JobListenerSupport {
+public class JobChainJobListener extends JobListenerSupport {
 
-	public static final String NAME = "_seqJobListener";
+	public static final String NAME = "_jobChainJobListener";
 
 	private String name;
 	private List<JobKey> jobKeys;
 	private Map<JobKey, JobKey> chainLinks;
 
-    public SeqJobListener(String name, List<JobKey> jobKeys) {
+    public JobChainJobListener(String name, List<JobKey> jobKeys) {
         if(name == null) {
-            throw new IllegalArgumentException("Listener name cannot be null!");
+            throw new IllegalArgumentException("listener name cannot be null!");
         }
         this.name = name;
         this.jobKeys = jobKeys;
@@ -35,10 +37,10 @@ public class SeqJobListener extends JobListenerSupport {
 			JobKey firstJob = jobKeys.get(i);
 			JobKey secondJob = jobKeys.get(i+1);
 			if(firstJob == null || secondJob == null) {
-				throw new IllegalArgumentException("Key cannot be null!");
+				throw new IllegalArgumentException("key cannot be null!");
 			}
 			if(firstJob.getName() == null || secondJob.getName() == null) {
-				throw new IllegalArgumentException("Key cannot have a null name!");
+				throw new IllegalArgumentException("key cannot have a null name!");
 			}
 			chainLinks.put(firstJob, secondJob);
 		}
@@ -52,28 +54,42 @@ public class SeqJobListener extends JobListenerSupport {
 
     @Override
 	public void jobWasExecuted(JobExecutionContext context, JobExecutionException jobException) {
-        JobKey secondJob = chainLinks.get(context.getJobDetail().getKey());
+    	JobKey jobKey = context.getJobDetail().getKey();
+        JobKey secondJob = chainLinks.get(jobKey);
         if(secondJob == null) {
         	removeListener(context);
         	removeJob(context);
             return;
         }
 
-        getLog().debug("Job '" + context.getJobDetail().getKey() + "' will now chain to Job '" + secondJob + "'");
+        if(jobException != null) {
+        	JobDataMap data = context.getJobDetail().getJobDataMap();
+        	String chainName = data.getString(ChainedJob.CHAIN_NAME);
+        	getLog().error("error encountered during jobChain '" + chainName + "' executing", jobException);
+        	JobKey chainEndJob = jobKey(data.getString(ChainedJob.CHAIN_END_JOB), jobKey.getGroup());
+        	try {
+				context.getScheduler().triggerJob(chainEndJob);
+			} catch (SchedulerException e) {
+				getLog().error("error encountered during end the jobChain '" + chainName + "'", e);
+			}
+        	return;
+        }
+
+        getLog().debug("job '" + jobKey + "' will now chain to job '" + secondJob + "'");
 
         try {
              context.getScheduler().triggerJob(secondJob);
         } catch(SchedulerException se) {
-            getLog().error("Error encountered during chaining to Job '" + secondJob + "'", se);
+            getLog().error("error encountered during chaining to Job '" + secondJob + "'", se);
         }
 	}
 
 	private void removeListener(JobExecutionContext context) {
-    	String listenerName = context.getJobDetail().getJobDataMap().getString(WorkflowJob.LISTENER_NAME);
+    	String listenerName = context.getJobDetail().getJobDataMap().getString(ChainedJob.LISTENER_NAME);
     	try {
 			context.getScheduler().getListenerManager().removeJobListener(listenerName);
 		} catch (SchedulerException e) {
-			getLog().error("Error encountered during remove job listener '" + listenerName + "'", e);
+			getLog().error("error encountered during remove job listener '" + listenerName + "'", e);
 		}
     }
 
@@ -89,7 +105,7 @@ public class SeqJobListener extends JobListenerSupport {
 					scheduler.unscheduleJob(triggerKey);
 				}
 			} catch (SchedulerException e) {
-				getLog().error("Error encountered during remove job '" + jobKey + "'", e);
+				getLog().error("error encountered during remove job '" + jobKey + "'", e);
 			}
 		}
 	}

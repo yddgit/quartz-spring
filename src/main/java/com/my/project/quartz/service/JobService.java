@@ -11,17 +11,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 
-import com.my.project.quartz.exception.WorkflowException;
 import com.my.project.quartz.job.QuartzJob;
-import com.my.project.quartz.job.WorkflowJob;
-import com.my.project.quartz.listener.FlowJobListener;
-import com.my.project.quartz.listener.FlowTriggerListener;
+import com.my.project.quartz.job.SimpleJob;
+import com.my.project.quartz.exception.JobChainException;
+import com.my.project.quartz.job.ChainedJob;
+import com.my.project.quartz.listener.ChainStatusJobListener;
+import com.my.project.quartz.listener.ChainStatusTriggerListener;
 import com.my.project.quartz.listener.TriggerMisfiredListener;
+import com.my.project.quartz.model.JobChain;
 import com.my.project.quartz.model.JobStatus;
 import com.my.project.quartz.model.SchedulerStatus;
-import com.my.project.quartz.model.workflow.FlowConfig;
-import com.my.project.quartz.model.workflow.FlowType;
-import com.my.project.quartz.model.workflow.Workflow;
 import com.my.project.quartz.util.JsonUtils;
 
 import static org.quartz.JobBuilder.*;
@@ -32,6 +31,7 @@ import static org.quartz.TriggerKey.*;
 import static org.quartz.impl.matchers.GroupMatcher.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -41,6 +41,7 @@ import java.util.stream.Collectors;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
+import org.apache.commons.lang3.StringUtils;
 import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobKey;
@@ -58,9 +59,9 @@ public class JobService {
 	@Autowired
 	private TriggerMisfiredListener triggerMisfiredListener;
 	@Autowired
-	private FlowTriggerListener flowTriggerListener;
+	private ChainStatusTriggerListener chainStatusTriggerListener;
 	@Autowired
-	private FlowJobListener flowJobListener;
+	private ChainStatusJobListener chainStatusJobListener;
 
 	private ListenerManager listenerManager;
 
@@ -76,8 +77,8 @@ public class JobService {
 	private void start() throws SchedulerException {
 		listenerManager = this.scheduler.getListenerManager();
 		listenerManager.addTriggerListener(triggerMisfiredListener);
-		listenerManager.addTriggerListener(flowTriggerListener);
-		listenerManager.addJobListener(flowJobListener);
+		listenerManager.addTriggerListener(chainStatusTriggerListener);
+		listenerManager.addJobListener(chainStatusJobListener);
 	}
 
 	@PreDestroy
@@ -91,7 +92,7 @@ public class JobService {
 		List<String> runningJobList = new ArrayList<String>();
 		runningJobs.forEach(job -> {
 			JobKey key = job.getJobDetail().getKey();
-			runningJobList.add(key.getName() + "." + key.getGroup());
+			runningJobList.add(key.toString());
 		});
 		status.setId(scheduler.getSchedulerInstanceId());
 		status.setName(scheduler.getSchedulerName());
@@ -127,7 +128,7 @@ public class JobService {
 			status.setPreviousFireTime(trigger.getPreviousFireTime());
 			status.setPriority(trigger.getPriority());
 			status.setState(scheduler.getTriggerState(triggerKey));
-			status.setRunning(flowTriggerListener.isRunning(job));
+			status.setRunning(chainStatusTriggerListener.isRunning(job));
 			list.add(status);
 		}
 		return list;
@@ -164,16 +165,7 @@ public class JobService {
 		if(scheduler.checkExists(triggerKey)) {
 			scheduler.unscheduleJob(triggerKey);
 		}
-	}
-
-	public void delete(JobKey jobKey) throws SchedulerException {
-		if(scheduler.checkExists(jobKey)) {
-			scheduler.deleteJob(jobKey);
-		}
-		TriggerKey triggerKey = triggerKey(jobKey.getName(), jobKey.getGroup());
-		if(scheduler.checkExists(triggerKey)) {
-			scheduler.unscheduleJob(triggerKey);
-		}
+		chainStatusTriggerListener.removeMutexJob(jobKey);
 	}
 
 	public void pause(String id) throws SchedulerException {
@@ -205,112 +197,72 @@ public class JobService {
 		}
 	}
 
-	public void add(FlowConfig flowConfig) throws SchedulerException, WorkflowException {
-		Assert.notNull(flowConfig, "flow config can not be null");
-		Assert.notNull(flowConfig.getName(), "flow name can not be null");
-		Assert.notNull(flowConfig.getCronExpression(), "flow cronExpression can not be null");
-		Assert.notNull(flowConfig.getWorkflow(), "workflow can not be null");
-		String endFlow = checkFlowConfig(flowConfig);
-		JobDetail job = newJob(WorkflowJob.class)
-			.withIdentity(flowConfig.getName(), GROUP_NAME)
-			.usingJobData(WorkflowJob.IS_FLOW, Boolean.toString(true))
-			.usingJobData(WorkflowJob.FLOW_DEFINITION, JsonUtils.toJsonString(flowConfig.getWorkflow()))
-			.usingJobData(WorkflowJob.ROOT_FLOW, flowConfig.getName())
-			.usingJobData(WorkflowJob.END_FLOW, endFlow)
+	public void add(JobChain jobChain) throws SchedulerException, JobChainException {
+		Assert.notNull(jobChain, "jobChain can not be null");
+		Assert.notNull(jobChain.getName(), "jobChain name can not be null");
+		Assert.notNull(jobChain.getCronExpression(), "jobChain cronExpression can not be null");
+		Assert.notNull(jobChain.getChainedJob(), "chainedJob can not be null");
+		String chainEndJob = checkJobChain(jobChain);
+		JobKey jobKey = jobKey(jobChain.getName(), GROUP_NAME);
+		JobDetail job = newJob(ChainedJob.class)
+			.withIdentity(jobKey)
+			.usingJobData(ChainedJob.CHAINED_JOBS, JsonUtils.toJsonString(jobChain.getChainedJob()))
+			.usingJobData(ChainedJob.CHAIN_NAME, jobChain.getName())
+			.usingJobData(ChainedJob.CHAIN_END_JOB, chainEndJob)
 			.build();
 		Trigger trigger = newTrigger()
-			.withIdentity(flowConfig.getName(), GROUP_NAME)
+			.withIdentity(jobChain.getName(), GROUP_NAME)
 			.startNow()
-			.withSchedule(cronSchedule(flowConfig.getCronExpression())
+			.withSchedule(cronSchedule(jobChain.getCronExpression())
 				.withMisfireHandlingInstructionDoNothing())
 			.forJob(job)
 			.build();
+		List<String> mutexChain = jobChain.getMutexChain();
+		for(String mutex : mutexChain) {
+			chainStatusTriggerListener.addMutexJob(jobKey, jobKey(mutex, GROUP_NAME));
+		}
 		scheduler.scheduleJob(job, trigger);
 	}
 
-	public JobKey add(String root, String end, String jobName, Workflow workflow, String listenerName) throws SchedulerException {
-		JobDetail job = newJob(WorkflowJob.class)
+	public JobKey add(String chainName, String chainEndJob, List<String> job, String listenerName) throws SchedulerException {
+		String jobName = chainName + "." + StringUtils.join(job, ChainedJob.NAME_SEPARATOR);
+		JobDetail jobDetail = newJob(SimpleJob.class)
 			.withIdentity(jobName, GROUP_NAME)
-			.usingJobData(WorkflowJob.FLOW_DEFINITION, JsonUtils.toJsonString(workflow))
-			.usingJobData(WorkflowJob.ROOT_FLOW, root)
-			.usingJobData(WorkflowJob.END_FLOW, end)
-			.usingJobData(WorkflowJob.LISTENER_NAME, listenerName)
+			.usingJobData(ChainedJob.CHAINED_JOBS, JsonUtils.toJsonString(job))
+			.usingJobData(ChainedJob.CHAIN_NAME, chainName)
+			.usingJobData(ChainedJob.CHAIN_END_JOB, chainEndJob)
+			.usingJobData(ChainedJob.LISTENER_NAME, listenerName)
 			.storeDurably(true)
 			.build();
-		scheduler.addJob(job, true);
-		return job.getKey();
+		scheduler.addJob(jobDetail, true);
+		return jobDetail.getKey();
 	}
 
-	private String checkFlowConfig(FlowConfig flowConfig) throws WorkflowException {
-
-		Workflow workflow = flowConfig.getWorkflow();
-
+	private String checkJobChain(JobChain jobChain) throws JobChainException {
+		List<List<String>> chainedJob = jobChain.getChainedJob();
 		// check for null
-		if(workflow == null) {
-			throw new WorkflowException("workflow can not be null");
+		if(chainedJob == null) {
+			throw new JobChainException("chainedJob can not be null");
 		}
-
-		// check for null type
-		FlowType type = workflow.getType();
-		if(type == null) {
-			throw new WorkflowException("workflow type can not be null", workflow);
-		}
-		
 		// append end job
-		Workflow end = new Workflow(FlowType.SINGLE, UUID.randomUUID().toString());
-		switch(type) {
-		case SEQ:
-			workflow.addWorkflow(end);
-			break;
-		case SINGLE:
-		case ALL:
-		case ANY:
-			String tempSeq = UUID.randomUUID().toString();
-			Workflow newFlow = new Workflow(FlowType.SEQ, tempSeq, workflow, end);
-			flowConfig.setWorkflow(newFlow);
-			break;
-		default:
-			throw new WorkflowException("unknown workflow type [" + type + "]", workflow);
-		}
-
+		List<String> chainEndJob = Arrays.asList(UUID.randomUUID().toString());
+		chainedJob.add(chainEndJob);
 		// check for duplicate names
 		List<String> jobNames = new ArrayList<String>();
-		getJobName(flowConfig.getName(), workflow, jobNames);
-		logger.info("workflow job list: " + JsonUtils.toJsonString(jobNames.subList(0, jobNames.size()-1), true));
+		String chainName = jobChain.getName();
+		for(List<String> job : chainedJob) {
+			if(job == null || job.size() == 0) {
+				throw new JobChainException("chained job must have at least one", job);
+			}
+			jobNames.add(chainName + "." + StringUtils.join(job, ChainedJob.NAME_SEPARATOR));
+		}
+		logger.info("jobChain job list: " + JsonUtils.toJsonString(jobNames.subList(0, jobNames.size()-1), true));
 		Set<String> duplicateName = checkDuplicateName(jobNames);
 		if(duplicateName != null && duplicateName.size() > 0) {
-			throw new WorkflowException("workflow name duplicated: " + duplicateName);
+			throw new JobChainException("chained job name duplicated", duplicateName);
 		}
-
 		// return end job name
 		return jobNames.get(jobNames.size()-1);
-
-	}
-
-	private void getJobName(String parentName, Workflow workflow, List<String> jobNames) throws WorkflowException {
-		FlowType type = workflow.getType();
-		if(type == null) {
-			throw new WorkflowException("workflow type can not be null", workflow);
-		}
-		String name = workflow.getName();
-		List<Workflow> jobs = workflow.getJobs();
-		switch(type) {
-			case SINGLE:
-				jobNames.add(parentName + "." + name);
-				break;
-			case SEQ:
-			case ALL:
-			case ANY:
-				if(jobs == null || jobs.size() == 0) {
-					throw new WorkflowException(type.name() + " workflow must have at least one child job", workflow);
-				}
-				for(Workflow w : jobs) {
-					getJobName(parentName + "." + name, w, jobNames);
-				}
-				break;
-			default:
-				throw new WorkflowException("unknown workflow type [" + type + "]", workflow);
-		}
 	}
 
 	private Set<String> checkDuplicateName(List<String> jobNames) {

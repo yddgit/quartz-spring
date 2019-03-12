@@ -1,0 +1,12 @@
+{
+	"name": "jobChain1",
+	"cronExpression": "*/10 * * * * ?",
+	"mutexChain": ["jobChain2"],
+	"chainedJob": [
+		["single1-1"],
+		["single1-2"],
+		["concurrent1-1", "concurrent1-2", "concurrent1-3"],
+		["concurrent1-4", "concurrent1-5", "concurrent1-6"],
+		["single1-3"]
+	]
+}

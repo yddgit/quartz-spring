@@ -11,10 +11,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.my.project.quartz.exception.WorkflowException;
+import com.my.project.quartz.exception.JobChainException;
+import com.my.project.quartz.model.JobChain;
 import com.my.project.quartz.model.JobStatus;
 import com.my.project.quartz.model.SchedulerStatus;
-import com.my.project.quartz.model.workflow.FlowConfig;
 import com.my.project.quartz.service.JobService;
 
 @RestController
@@ -40,8 +40,8 @@ public class JobAPI {
 	}
 
 	@RequestMapping(value = "/add", method = RequestMethod.POST, consumes = MediaType.APPLICATION_JSON_UTF8_VALUE)
-	public void add(@RequestBody FlowConfig flowConfig) throws SchedulerException, WorkflowException {
-		jobService.add(flowConfig);
+	public void add(@RequestBody JobChain jobChain) throws SchedulerException, JobChainException {
+		jobService.add(jobChain);
 	}
 
 	@RequestMapping(value = "/delete/{id}", method = RequestMethod.GET)
