@@ -2,8 +2,6 @@ package com.my.project.quartz.model;
 
 import java.util.Date;
 
-import org.quartz.Trigger.TriggerState;
-
 public class JobStatus {
 
 	private String name;
@@ -13,7 +11,6 @@ public class JobStatus {
 	private Date nextFireTime;
 	private int priority;
 	private boolean running;
-	private TriggerState state;
 
 	public String getName() {
 		return name;
@@ -56,12 +53,6 @@ public class JobStatus {
 	}
 	public void setRunning(boolean running) {
 		this.running = running;
-	}
-	public TriggerState getState() {
-		return state;
-	}
-	public void setState(TriggerState state) {
-		this.state = state;
 	}
 
 }

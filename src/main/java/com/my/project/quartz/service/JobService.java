@@ -32,6 +32,8 @@ import static org.quartz.impl.matchers.GroupMatcher.*;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -111,27 +113,40 @@ public class JobService {
 		Set<JobKey> jobs =  scheduler.getJobKeys(jobGroupEquals(GROUP_NAME));
 		List<JobStatus> list = new ArrayList<JobStatus>();
 		JobStatus status = null;
-		TriggerKey triggerKey = null;
 		Trigger trigger = null;
 		for(JobKey job : jobs) {
-			// check trigger
-			List<? extends Trigger> triggers = scheduler.getTriggersOfJob(job);
-			if(triggers == null || triggers.size() == 0) { continue; }
-			trigger = triggers.get(0);
-			if(!trigger.getKey().getGroup().equals(GROUP_NAME)) { continue; }
-			// fill status info
 			status = new JobStatus();
 			status.setName(job.getName());
 			status.setGroup(job.getGroup());
-			status.setStartTime(trigger.getStartTime());
-			status.setNextFireTime(trigger.getNextFireTime());
-			status.setPreviousFireTime(trigger.getPreviousFireTime());
-			status.setPriority(trigger.getPriority());
-			status.setState(scheduler.getTriggerState(triggerKey));
-			status.setRunning(chainStatusTriggerListener.isRunning(job));
+			status.setRunning(jobIsRunning(job));
+			List<? extends Trigger> triggers = scheduler.getTriggersOfJob(job);
+			if(triggers != null && triggers.size() > 0 && triggers.get(0).getKey().getGroup().equals(GROUP_NAME)) {
+				trigger = triggers.get(0);
+				// check trigger
+				status.setStartTime(trigger.getStartTime());
+				status.setNextFireTime(trigger.getNextFireTime());
+				status.setPreviousFireTime(trigger.getPreviousFireTime());
+				status.setPriority(trigger.getPriority());				
+			}
 			list.add(status);
 		}
+		Collections.sort(list, (s1, s2) -> { return s1.getName().compareTo(s2.getName()); });
 		return list;
+	}
+
+	private boolean jobIsRunning(JobKey job) throws SchedulerException {
+		if(chainStatusTriggerListener.isRunning(job)) {
+			return true;
+		} else {			
+			List<JobExecutionContext> runningJobs = scheduler.getCurrentlyExecutingJobs();
+			for(JobExecutionContext context : runningJobs){
+				JobKey running = context.getJobDetail().getKey();
+				if(job.equals(running)) {
+					return true;
+				}
+			}
+			return false;
+		}
 	}
 
 	public void add() throws SchedulerException {
@@ -156,42 +171,42 @@ public class JobService {
 		scheduler.scheduleJob(job, trigger);
 	}
 
-	public void delete(String id) throws SchedulerException {
-		JobKey jobKey = jobKey(id, GROUP_NAME);
+	public void delete(String name) throws SchedulerException {
+		JobKey jobKey = jobKey(name, GROUP_NAME);
 		if(scheduler.checkExists(jobKey)) {
 			scheduler.deleteJob(jobKey);
 		}
-		TriggerKey triggerKey = triggerKey(id, GROUP_NAME);
+		TriggerKey triggerKey = triggerKey(name, GROUP_NAME);
 		if(scheduler.checkExists(triggerKey)) {
 			scheduler.unscheduleJob(triggerKey);
 		}
 		chainStatusTriggerListener.removeMutexJob(jobKey);
 	}
 
-	public void pause(String id) throws SchedulerException {
-		JobKey jobKey = jobKey(id, GROUP_NAME);
+	public void pause(String name) throws SchedulerException {
+		JobKey jobKey = jobKey(name, GROUP_NAME);
 		if(scheduler.checkExists(jobKey)) {
 			scheduler.pauseJob(jobKey);
 		}
-		TriggerKey triggerKey = triggerKey(id, GROUP_NAME);
+		TriggerKey triggerKey = triggerKey(name, GROUP_NAME);
 		if(scheduler.checkExists(triggerKey) && !TriggerState.PAUSED.equals(scheduler.getTriggerState(triggerKey))) {
 			scheduler.pauseTrigger(triggerKey);
 		}
 	}
 
-	public void resume(String id) throws SchedulerException {
-		JobKey jobKey = jobKey(id, GROUP_NAME);
+	public void resume(String name) throws SchedulerException {
+		JobKey jobKey = jobKey(name, GROUP_NAME);
 		if(scheduler.checkExists(jobKey)) {
 			scheduler.resumeJob(jobKey);
 		}
-		TriggerKey triggerKey = triggerKey(id, GROUP_NAME);
+		TriggerKey triggerKey = triggerKey(name, GROUP_NAME);
 		if(scheduler.checkExists(triggerKey) && TriggerState.PAUSED.equals(scheduler.getTriggerState(triggerKey))) {
 			scheduler.resumeTrigger(triggerKey);
 		}
 	}
 
-	public void run(String id) throws SchedulerException {
-		JobKey jobKey = jobKey(id, GROUP_NAME);
+	public void run(String name) throws SchedulerException {
+		JobKey jobKey = jobKey(name, GROUP_NAME);
 		if(scheduler.checkExists(jobKey)) {
 			scheduler.triggerJob(jobKey);
 		}
@@ -200,28 +215,39 @@ public class JobService {
 	public void add(JobChain jobChain) throws SchedulerException, JobChainException {
 		Assert.notNull(jobChain, "jobChain can not be null");
 		Assert.notNull(jobChain.getName(), "jobChain name can not be null");
-		Assert.notNull(jobChain.getCronExpression(), "jobChain cronExpression can not be null");
 		Assert.notNull(jobChain.getChainedJob(), "chainedJob can not be null");
+
 		String chainEndJob = checkJobChain(jobChain);
 		JobKey jobKey = jobKey(jobChain.getName(), GROUP_NAME);
-		JobDetail job = newJob(ChainedJob.class)
+		JobDetail jobDetail = newJob(ChainedJob.class)
 			.withIdentity(jobKey)
 			.usingJobData(ChainedJob.CHAINED_JOBS, JsonUtils.toJsonString(jobChain.getChainedJob()))
 			.usingJobData(ChainedJob.CHAIN_NAME, jobChain.getName())
 			.usingJobData(ChainedJob.CHAIN_END_JOB, chainEndJob)
+			.storeDurably(true)
 			.build();
-		Trigger trigger = newTrigger()
-			.withIdentity(jobChain.getName(), GROUP_NAME)
-			.startNow()
-			.withSchedule(cronSchedule(jobChain.getCronExpression())
-				.withMisfireHandlingInstructionDoNothing())
-			.forJob(job)
-			.build();
+
 		List<String> mutexChain = jobChain.getMutexChain();
-		for(String mutex : mutexChain) {
-			chainStatusTriggerListener.addMutexJob(jobKey, jobKey(mutex, GROUP_NAME));
+		if(mutexChain != null && mutexChain.size() > 0) {
+			Set<JobKey> mutexJobs = new HashSet<JobKey>();
+			for(String mutex : mutexChain) {
+				mutexJobs.add(jobKey(mutex, GROUP_NAME));
+			}
+			chainStatusTriggerListener.addMutexJob(jobKey, mutexJobs);
 		}
-		scheduler.scheduleJob(job, trigger);
+
+		if(StringUtils.isNotBlank(jobChain.getCronExpression())) {
+			Trigger trigger = newTrigger()
+				.withIdentity(jobChain.getName(), GROUP_NAME)
+				.startNow()
+				.withSchedule(cronSchedule(jobChain.getCronExpression())
+					.withMisfireHandlingInstructionDoNothing())
+				.forJob(jobDetail)
+				.build();
+			scheduler.scheduleJob(jobDetail, trigger);
+		} else {
+			scheduler.addJob(jobDetail, true);
+		}
 	}
 
 	public JobKey add(String chainName, String chainEndJob, List<String> job, String listenerName) throws SchedulerException {

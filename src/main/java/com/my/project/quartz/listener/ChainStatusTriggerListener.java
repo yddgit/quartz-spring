@@ -1,9 +1,13 @@
 package com.my.project.quartz.listener;
 
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 import org.quartz.JobExecutionContext;
 import org.quartz.JobKey;
@@ -11,36 +15,61 @@ import org.quartz.Trigger;
 import org.quartz.listeners.TriggerListenerSupport;
 import org.springframework.stereotype.Component;
 
+import com.my.project.quartz.util.JsonUtils;
+
 @Component
 public class ChainStatusTriggerListener extends TriggerListenerSupport {
 
 	public static final String NAME = "_chainStatusTriggerListener";
 
 	private List<JobKey> runningChain;
-	private Map<JobKey, JobKey> mutexChain;
+	private Map<JobKey, Set<JobKey>> mutexChain;
 
     public ChainStatusTriggerListener() {
         this.runningChain = new CopyOnWriteArrayList<JobKey>();
-        this.mutexChain = new ConcurrentHashMap<JobKey, JobKey>();
+        this.mutexChain = new ConcurrentHashMap<JobKey, Set<JobKey>>();
     }
 
     public synchronized void addRunningChain(JobKey jobKey) {
+    	getLog().info("jobChain '" + jobKey + "' start");
     	this.runningChain.add(jobKey);
     }
 
     public synchronized void removeRunningChain(JobKey jobKey) {
+    	getLog().info("jobChain '" + jobKey + "' done");
     	this.runningChain.remove(jobKey);
     }
 
-    public synchronized void addMutexJob(JobKey job1, JobKey job2) {
-    	this.mutexChain.put(job1, job2);
-    	this.mutexChain.put(job2, job1);
+    public synchronized void addMutexJob(JobKey job, Set<JobKey> mutexJobs) {
+        if(job == null || mutexJobs == null) {
+            throw new IllegalArgumentException("jobKey added to mutex list cannot be null!");
+        }
+        // job --> mutexJobs
+        Set<JobKey> oldMutexJobs = this.mutexChain.get(job);
+        if(oldMutexJobs == null) {
+        	oldMutexJobs = new CopyOnWriteArraySet<JobKey>();
+        }
+        oldMutexJobs.addAll(mutexJobs);
+    	this.mutexChain.put(job, mutexJobs);
+    	// mutexJobs --> job
+    	for(JobKey mutexJob : mutexJobs) {
+            Set<JobKey> old = this.mutexChain.get(mutexJob);
+            if(old == null) {
+            	old = new CopyOnWriteArraySet<JobKey>();
+            }
+            old.add(job);
+        	this.mutexChain.put(mutexJob, old);
+    	}
     }
 
     public synchronized void removeMutexJob(JobKey job) {
-    	for(Map.Entry<JobKey, JobKey> entry : this.mutexChain.entrySet()) {
-    		if(entry.getKey().equals(job) || entry.getValue().equals(job)) {
-    			this.mutexChain.remove(entry.getKey(), entry.getValue());
+    	this.mutexChain.remove(job);
+    	Iterator<Map.Entry<JobKey, Set<JobKey>>> it = this.mutexChain.entrySet().iterator();
+    	Map.Entry<JobKey, Set<JobKey>> entry = null;
+    	while(it.hasNext()) {
+    		entry = it.next();
+    		if(entry.getValue().contains(job)) {
+    			entry.getValue().remove(job);
     		}
     	}
     }
@@ -65,10 +94,18 @@ public class ChainStatusTriggerListener extends TriggerListenerSupport {
 			getLog().info("jobChain '" + jobKey + "' is running now, will not run again.");
 			return true;
 		}
-		JobKey mutexJob = mutexChain.get(jobKey);
-		if(runningChain.contains(mutexJob)) {
-			getLog().info("mutex jobChain '" + mutexJob + "' is running now, will not run '" + jobKey + "'.");
-			return true;
+		Set<JobKey> mutexJobs = mutexChain.get(jobKey);
+		if(mutexJobs != null && mutexJobs.size() > 0) {
+			Set<JobKey> runningMutexJobs = new HashSet<JobKey>();
+			for(JobKey mutexJob : mutexJobs) {
+				if(runningChain.contains(mutexJob)) {
+					runningMutexJobs.add(mutexJob);
+				}
+			}
+			if(runningMutexJobs.size() > 0) {
+				getLog().info("mutex jobChain " + JsonUtils.toJsonString(runningMutexJobs, true) + " is running now, will not run '" + jobKey + "'.");
+				return true;
+			}
 		}
 		return false;
 	}
