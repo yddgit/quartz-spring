@@ -1,6 +1,7 @@
 package com.my.project.quartz.model;
 
 import java.util.Date;
+import java.util.List;
 
 public class JobStatus {
 
@@ -11,6 +12,7 @@ public class JobStatus {
 	private Date nextFireTime;
 	private int priority;
 	private boolean running;
+	private List<String> mutexJobs;
 
 	public String getName() {
 		return name;
@@ -53,6 +55,12 @@ public class JobStatus {
 	}
 	public void setRunning(boolean running) {
 		this.running = running;
+	}
+	public List<String> getMutexJobs() {
+		return mutexJobs;
+	}
+	public void setMutexJobs(List<String> mutexJobs) {
+		this.mutexJobs = mutexJobs;
 	}
 
 }

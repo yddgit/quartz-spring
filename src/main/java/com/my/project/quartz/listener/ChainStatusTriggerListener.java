@@ -74,6 +74,14 @@ public class ChainStatusTriggerListener extends TriggerListenerSupport {
     	}
     }
 
+    public Set<JobKey> getMutexJob(JobKey job) {
+    	Set<JobKey> mutex = this.mutexChain.get(job);
+    	if(mutex == null) {
+    		mutex = new CopyOnWriteArraySet<JobKey>();
+    	}
+    	return mutex;
+    }
+
     public boolean isRunning(JobKey jobKey) {
     	return runningChain.contains(jobKey);
     }

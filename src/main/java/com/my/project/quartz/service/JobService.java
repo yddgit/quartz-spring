@@ -119,6 +119,7 @@ public class JobService {
 			status.setName(job.getName());
 			status.setGroup(job.getGroup());
 			status.setRunning(jobIsRunning(job));
+			status.setMutexJobs(chainStatusTriggerListener.getMutexJob(job).stream().map(JobKey::getName).collect(Collectors.toList()));
 			List<? extends Trigger> triggers = scheduler.getTriggersOfJob(job);
 			if(triggers != null && triggers.size() > 0 && triggers.get(0).getKey().getGroup().equals(GROUP_NAME)) {
 				trigger = triggers.get(0);
