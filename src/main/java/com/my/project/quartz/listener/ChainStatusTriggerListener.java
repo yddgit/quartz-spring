@@ -1,7 +1,6 @@
 package com.my.project.quartz.listener;
 
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,6 +63,7 @@ public class ChainStatusTriggerListener extends TriggerListenerSupport {
 
     public synchronized void removeMutexJob(JobKey job) {
     	this.mutexChain.remove(job);
+    	/*
     	Iterator<Map.Entry<JobKey, Set<JobKey>>> it = this.mutexChain.entrySet().iterator();
     	Map.Entry<JobKey, Set<JobKey>> entry = null;
     	while(it.hasNext()) {
@@ -72,6 +72,7 @@ public class ChainStatusTriggerListener extends TriggerListenerSupport {
     			entry.getValue().remove(job);
     		}
     	}
+    	*/
     }
 
     public Set<JobKey> getMutexJob(JobKey job) {
