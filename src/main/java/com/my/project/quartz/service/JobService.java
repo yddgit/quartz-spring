@@ -13,6 +13,7 @@ import org.springframework.util.Assert;
 
 import com.my.project.quartz.job.QuartzJob;
 import com.my.project.quartz.job.SimpleJob;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.my.project.quartz.exception.JobChainException;
 import com.my.project.quartz.job.ChainedJob;
 import com.my.project.quartz.listener.ChainStatusJobListener;
@@ -44,6 +45,8 @@ import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
 import org.apache.commons.lang3.StringUtils;
+import org.quartz.CronTrigger;
+import org.quartz.JobDataMap;
 import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobKey;
@@ -115,11 +118,26 @@ public class JobService {
 		JobStatus status = null;
 		Trigger trigger = null;
 		for(JobKey job : jobs) {
+			JobDataMap data = scheduler.getJobDetail(job).getJobDataMap();
+			if(job.getName().equals(data.getString(ChainedJob.CHAIN_END_JOB))) {
+				continue; // ignore end job
+			}
 			status = new JobStatus();
 			status.setName(job.getName());
 			status.setGroup(job.getGroup());
 			status.setRunning(jobIsRunning(job));
 			status.setMutexJobs(chainStatusTriggerListener.getMutexJob(job).stream().map(JobKey::getName).collect(Collectors.toList()));
+			String chainedJobs = data.getString(ChainedJob.CHAINED_JOBS);
+			if(chainedJobs != null) {
+				if(data.getString(ChainedJob.LISTENER_NAME) == null) {
+					List<List<String>> chains = JsonUtils.jsonToObject(chainedJobs, new TypeReference<List<List<String>>>(){});
+					chains.remove(chains.size() - 1);
+					status.setChainedJobs(chains);
+				} else {
+					List<String> chains = JsonUtils.jsonToList(chainedJobs, String.class);
+					status.setChainedJobs(chains);
+				}
+			}
 			List<? extends Trigger> triggers = scheduler.getTriggersOfJob(job);
 			if(triggers != null && triggers.size() > 0 && triggers.get(0).getKey().getGroup().equals(GROUP_NAME)) {
 				trigger = triggers.get(0);
@@ -128,6 +146,9 @@ public class JobService {
 				status.setNextFireTime(trigger.getNextFireTime());
 				status.setPreviousFireTime(trigger.getPreviousFireTime());
 				status.setPriority(trigger.getPriority());				
+				if(trigger instanceof CronTrigger) {
+					status.setCronExpression(((CronTrigger)trigger).getCronExpression());
+				}
 			}
 			list.add(status);
 		}

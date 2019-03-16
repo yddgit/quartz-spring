@@ -13,6 +13,8 @@ public class JobStatus {
 	private int priority;
 	private boolean running;
 	private List<String> mutexJobs;
+	private List<?> chainedJobs;
+	private String cronExpression;
 
 	public String getName() {
 		return name;
@@ -61,6 +63,18 @@ public class JobStatus {
 	}
 	public void setMutexJobs(List<String> mutexJobs) {
 		this.mutexJobs = mutexJobs;
+	}
+	public List<?> getChainedJobs() {
+		return chainedJobs;
+	}
+	public void setChainedJobs(List<?> chainedJobs) {
+		this.chainedJobs = chainedJobs;
+	}
+	public String getCronExpression() {
+		return cronExpression;
+	}
+	public void setCronExpression(String cronExpression) {
+		this.cronExpression = cronExpression;
 	}
 
 }
